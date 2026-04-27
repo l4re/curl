@@ -30,11 +30,10 @@
 #include "tool_msgs.h"
 #include "tool_parsecfg.h"
 #include "tool_util.h"
-#include "memdebug.h" /* keep this as LAST include */
 
 /* only acknowledge colon or equals as separators if the option was not
    specified with an initial dash! */
-#define ISSEP(x,dash) (!dash && (((x) == '=') || ((x) == ':')))
+#define ISSEP(x, dash) (!(dash) && (((x) == '=') || ((x) == ':')))
 
 /*
  * Copies the string from line to the param dynbuf, unquoting backslash-quoted
@@ -54,7 +53,7 @@ static int unslashquote(const char *line, struct dynbuf *param)
       /* default is to output the letter after the backslash */
       switch(out = *line) {
       case '\0':
-        continue; /* this'll break out of the loop */
+        continue; /* this breaks out of the loop */
       case 't':
         out = '\t';
         break;
@@ -78,10 +77,9 @@ static int unslashquote(const char *line, struct dynbuf *param)
   return 0; /* ok */
 }
 
-#define MAX_CONFIG_LINE_LENGTH (10*1024*1024)
-
 /* return 0 on everything-is-fine, and non-zero otherwise */
-ParameterError parseconfig(const char *filename, int max_recursive)
+ParameterError parseconfig(const char *filename, int max_recursive,
+                           char **resolved)
 {
   FILE *file = NULL;
   bool usedarg = FALSE;
@@ -95,15 +93,15 @@ ParameterError parseconfig(const char *filename, int max_recursive)
     if(curlrc) {
       file = curlx_fopen(curlrc, FOPEN_READTEXT);
       if(!file) {
-        free(curlrc);
+        curlx_free(curlrc);
         return PARAM_READ_ERROR;
       }
       filename = pathalloc = curlrc;
     }
-#if defined(_WIN32) && !defined(UNDER_CE)
+#ifdef _WIN32
     else {
       char *fullp;
-      /* check for .curlrc then _curlrc in the dir of the executable */
+      /* check for .curlrc then _curlrc in the directory of the executable */
       file = tool_execpath(".curlrc", &fullp);
       if(!file)
         file = tool_execpath("_curlrc", &fullp);
@@ -174,6 +172,11 @@ ParameterError parseconfig(const char *filename, int max_recursive)
         param = curlx_dyn_len(&pbuf) ? curlx_dyn_ptr(&pbuf) : CURL_UNCONST("");
       }
       else {
+        if(*line == '\'') {
+          warnf("%s:%d Option '%s' uses argument with leading single quote. "
+                "It is probably a mistake. Consider double quotes.",
+                filename, lineno, option);
+        }
         param = line; /* parameter starts here */
         while(*line && !ISSPACE(*line)) /* stop also on CRLF */
           line++;
@@ -194,7 +197,7 @@ ParameterError parseconfig(const char *filename, int max_recursive)
           case '#': /* comment */
             break;
           default:
-            warnf("%s:%d: warning: '%s' uses unquoted whitespace. "
+            warnf("%s:%d Option '%s' uses argument with unquoted whitespace. "
                   "This may cause side-effects. Consider double quotes.",
                   filename, lineno, option);
           }
@@ -206,7 +209,8 @@ ParameterError parseconfig(const char *filename, int max_recursive)
       }
 
 #ifdef DEBUG_CONFIG
-      curl_mfprintf(tool_stderr, "PARAM: \"%s\"\n",(param ? param : "(null)"));
+      curl_mfprintf(tool_stderr, "PARAM: \"%s\"\n",
+                    (param ? param : "(null)"));
 #endif
       res = getparameter(option, param, &usedarg, config, max_recursive);
       config = global->last;
@@ -242,11 +246,11 @@ ParameterError parseconfig(const char *filename, int max_recursive)
            res != PARAM_VERSION_INFO_REQUESTED &&
            res != PARAM_ENGINES_REQUESTED &&
            res != PARAM_CA_EMBED_REQUESTED) {
-          /* only show error in the first level config call */
-          if(max_recursive == CONFIG_MAX_LEVELS) {
-            const char *reason = param2text(res);
-            errorf("%s:%d: '%s' %s", filename, lineno, option, reason);
-          }
+          const char *reason = param2text(res);
+          errorf("%s:%d config file option '%s' %s",
+                 filename, lineno, option, reason);
+          if(res == PARAM_OPTION_UNKNOWN)
+            res = PARAM_CONFIG_OPTION_UNKNOWN;
           err = res;
         }
       }
@@ -255,6 +259,8 @@ ParameterError parseconfig(const char *filename, int max_recursive)
     curlx_dyn_free(&pbuf);
     if(file != stdin)
       curlx_fclose(file);
+    /* Silence false positive about failing to close stdin.
+       NOLINTNEXTLINE(clang-analyzer-unix.Stream) */
     if(fileerror)
       err = PARAM_READ_ERROR;
   }
@@ -264,10 +270,14 @@ ParameterError parseconfig(const char *filename, int max_recursive)
   if((err == PARAM_READ_ERROR) && filename)
     errorf("cannot read config from '%s'", filename);
 
-  free(pathalloc);
+  if(!err && resolved) {
+    *resolved = curlx_strdup(filename);
+    if(!*resolved)
+      err = PARAM_NO_MEM;
+  }
+  curlx_free(pathalloc);
   return err;
 }
-
 
 static bool get_line(FILE *input, struct dynbuf *buf, bool *error)
 {
@@ -275,7 +285,7 @@ static bool get_line(FILE *input, struct dynbuf *buf, bool *error)
   char buffer[128];
   curlx_dyn_reset(buf);
   while(1) {
-    char *b = fgets(buffer, sizeof(buffer), input);
+    const char *b = fgets(buffer, sizeof(buffer), input);
 
     if(b) {
       size_t rlen = strlen(b);
