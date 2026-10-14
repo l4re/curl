@@ -73,7 +73,7 @@ static size_t read_cb(char *ptr, size_t size, size_t nmemb, void *stream)
   return retcode;
 }
 
-int main(int argc, const char **argv)
+int main(int argc, const char *argv[])
 {
   CURL *curl;
   CURLcode result;
@@ -96,7 +96,7 @@ int main(int argc, const char **argv)
     return 2;
 
   /* get the file size of the local file */
-  if(fstat(fileno(hd_src), &file_info) != 0) {
+  if(fstat(fileno(hd_src), &file_info)) {
     fclose(hd_src);
     return 1; /* cannot continue */
   }
@@ -128,6 +128,10 @@ int main(int argc, const char **argv)
        since we must be sure to use the correct data size */
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE,
                      (curl_off_t)file_info.st_size);
+
+    /* ask libcurl to use a larger size for the upload buffer */
+    curl_easy_setopt(curl, CURLOPT_UPLOAD_BUFFERSIZE,
+                     (long)400000);
 
     /* Now run off and do what you have been told! */
     result = curl_easy_perform(curl);

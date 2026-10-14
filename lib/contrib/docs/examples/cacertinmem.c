@@ -26,6 +26,10 @@
  * </DESC>
  */
 
+/* This example uses the legacy and discouraged method. Use
+   CURLOPT_CAINFO_BLOB instead, which is TLS backend agnostic. See the
+   cainfo-blob.c example */
+
 /* Requires: USE_OPENSSL */
 
 #include <openssl/ssl.h>
@@ -155,7 +159,7 @@ int main(void)
     curl_easy_setopt(curl, CURLOPT_CAINFO, NULL);
     curl_easy_setopt(curl, CURLOPT_CAPATH, NULL);
 
-    /* first try: retrieve page without ca certificates -> should fail
+    /* first try: retrieve page without CA certificates -> should fail
      * unless libcurl was built --with-ca-fallback enabled at build-time
      */
     result = curl_easy_perform(curl);
@@ -166,10 +170,10 @@ int main(void)
 
     /* use a fresh connection (optional) this option seriously impacts
      * performance of multiple transfers but it is necessary order to
-     * demonstrate this example. recall that the ssl ctx callback is only
+     * demonstrate this example. recall that the SSL ctx callback is only
      * called _before_ an SSL connection is established, therefore it does not
      * affect existing verified SSL connections already in the connection
-     * cache associated with this handle. normally you would set the ssl ctx
+     * cache associated with this handle. normally you would set the SSL ctx
      * function before making any transfers, and not use this option.
      */
     curl_easy_setopt(curl, CURLOPT_FRESH_CONNECT, 1L);
